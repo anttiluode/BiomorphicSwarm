@@ -12,6 +12,7 @@ It is a weird little thing. It descends from a physics toy about a particle on a
 pip install -r requirements.txt
 python swarmcabbage.py              # the app
 python swarmcabbage.py --benchmark  # swarm vs pinned vs random, headless (~15 min on CPU)
+python swarmcabbage.py --benchmark --conditions random swarm reweighted@1 reweighted@4 reweighted@16
 python why_it_focuses.py            # why it sharpens coarse-to-fine
 python lineage_test.py              # the lineage's sampling strategies, head to head
 python tools/render_lineage.py      # re-runs the ancestors in lineage/ and redraws their figures
@@ -159,6 +160,26 @@ The single scout never learns the image; it keeps repainting the spot it stands 
 
 So the idea carried for fifteen months, a particle that climbs toward what's wrong, is the part that **doesn't** help the picture. Scattering the same patches at random beats it. The reason is the cortex: it's one small network covering the whole image, so every update nudges everything. Scouts crowding onto the hardest spots feed it the same few patches, and it gets better there and worse everywhere else. What makes your face appear came in from the other side of the family tree: cabbage3's field, spectral bias and time.
 
+### The fix that almost works: importance sampling
+
+![reweighted scouts tracing the A](figs/reweighted_gui.png)
+
+The scouts are a Langevin system: mass, friction and random kicks, the equation of a particle in Brownian motion. A particle like that settles into a predictable distribution, dense where the landscape is high. So the hive is a **sampler**, and the swarm's real mistake is statistical. It oversamples the hard spots and lets every sample count equally, so it trains on a picture where the edges matter ten times more than the background.
+
+Statistics has a standard fix: **importance sampling**. Sample wherever you like, but divide each sample's weight by how often you sample there. The **Reweighted swarm** mode keeps a running map of where each scout type samples (the same idea as the WHERE IT LOOKED pane) and weights each patch by 1 / density. The weights are clipped to 0.2–5 and normalised per scout type. The **Temperature** slider scales the random kicks: hot scouts wander, cold scouts chase error greedily.
+
+Same benchmark, same 50 patches per step, 3 seeds (`reweighted_benchmark.txt`):
+
+| condition | error after learning A | whole image, 300 steps after surprise | inside the new object, 50 / 100 / 300 steps after |
+|---|---:|---:|---|
+| swarm (unweighted) | 0.053 | 0.046 | 0.107 / 0.118 / 0.086 |
+| reweighted, T = 1 | 0.017 | 0.018 | 0.134 / 0.061 / 0.055 |
+| reweighted, T = 4 | 0.013 | 0.023 | 0.107 / 0.097 / 0.055 |
+| reweighted, T = 16 | 0.018 | **0.009** | **0.067 / 0.067 / 0.040** |
+| random | **0.008** | **0.009** | 0.129 / 0.119 / 0.050 |
+
+Reweighting removes most of the damage: learning the A goes from 0.053 to 0.013–0.018. Random is still about 2× better at learning a picture from scratch. When something new appears, though, the hot reweighted swarm ties random on the whole image and finds the new object about twice as fast in the first 100 steps. That's the first place in fifteen months where the scouts earn anything, and it's the job attention is for: noticing what changed. It's also noisy (only 3 seeds, and there's a bump at step 200 in the T = 16 row), so treat it as a lead, not a result.
+
 The scouts are still worth watching: they are a live map of where the picture is hardest, which is why they gather on the bright window. Flip to **Random** and compare. "Choosing where to look beats looking more" should only pay off with a memory where writing one spot leaves the rest alone, like a pixel canvas or a set of splats. That's an open question, not a result.
 
 ---
@@ -171,7 +192,8 @@ The scouts are still worth watching: they are a live map of where the picture is
 | Use Webcam | target becomes your live camera, mirrored, refreshed every 4 steps |
 | Add Surprise | pastes a new object into one corner of the target |
 | Reset to 'A' | the built-in letter target |
-| Swarm / Pinned / Random | where the 50 scouts put their patches |
+| Swarm / Reweighted / Pinned / Random | where the 50 scouts put their patches, and whether crowded spots count less |
+| Temperature | scales the scouts' random kicks: hot = wandering, cold = greedy |
 | AWAKEN / FREEZE HIVE | run / pause learning |
 
 The status panel shows the average patch loss (error where the scouts look), the whole-image MSE (error everywhere), and the swarm's momentum: 0.95 while the error is high (EXPLORING), 0.85 once it is low (SETTLING).
@@ -201,13 +223,16 @@ The complex layers are two real weight matrices tied together, so this is an ord
 - First-layer edges start through the centre and move out slowly, which matches the ray pattern.
 - One error-climbing scout (cabbage4) fails to learn the whole image; full-view training (cabbage3) succeeds (`lineage_test.py`).
 - With 50 patches per step, random placement beats error-climbing and pinned scouts, both when learning and when recovering from a surprise (`benchmark.txt`).
+- Importance weighting (1 / sampling density) cuts the swarm's error on the A by about 3×, but random still learns about 2× better (`reweighted_benchmark.txt`).
+- A local memory (Gaussian bumps) does not rescue the unweighted swarm; random wins at every locality tested (`locality_test.py`, `locality.txt`, 2 seeds).
 - The instanton's "tunnelling" is its centre-of-mass readout jumping as blobs appear and vanish in an unstable field. Measured in an August 2026 audit; the spike is visible in the figure.
 
 **Explained, not separately tested**
 - The blend of recent frames (reason 3).
 
 **Open**
-- Whether error-seeking scouts win once the memory is local.
+- Whether hot, reweighted scouts really detect new objects faster than random; needs more seeds.
+- Whether sampling in proportion to the gradient, which theory says is optimal, beats sampling by error.
 
 ## References
 
